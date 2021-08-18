@@ -18,6 +18,26 @@
 
 #include <rapidjson/document.h>
 
+#include <stdio.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <string.h>
+#include <curl/curl.h>
+#include <fstream>
+
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+#include <errno.h>
+#include <netdb.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <time.h>
+
 #include <AVSCommon/Utils/Configuration/ConfigurationNode.h>
 #include <AVSCommon/Utils/Logger/Logger.h>
 #include "SampleApp/PortAudioMicrophoneWrapper.h"
@@ -28,17 +48,48 @@ namespace sampleApp {
 
 using avsCommon::avs::AudioInputStream;
 
-static const int NUM_INPUT_CHANNELS = 1;
-static const int NUM_OUTPUT_CHANNELS = 0;
-static const double SAMPLE_RATE = 16000;
-static const unsigned long PREFERRED_SAMPLES_PER_CALLBACK = paFramesPerBufferUnspecified;
-
 static const std::string SAMPLE_APP_CONFIG_ROOT_KEY("sampleApp");
 static const std::string PORTAUDIO_CONFIG_ROOT_KEY("portAudio");
-static const std::string PORTAUDIO_CONFIG_SUGGESTED_LATENCY_KEY("suggestedLatency");
 
 /// String to identify log entries originating from this file.
 static const std::string TAG("PortAudioMicrophoneWrapper");
+
+//UDP SOCKET 
+struct sockaddr_in servaddr;
+struct sockaddr sender;
+
+socklen_t len;
+static const int PORT = 3331;
+static const std::string host = "127.0.0.1"; 
+
+int sockfd, dataRecv = 0;
+int m_sock;
+int16_t *payload[51200];
+
+bool connected = false;
+
+bool previous_udp = false;
+static const int RIFF_HEADER_SIZE = 44;
+
+const char* books[] = {"War and Peace",
+                       "Pride and Prejudice",
+                       "The Sound and the Fury"};
+
+//FOR SKILL
+//Wav's path
+static std::string wav_path = "/home/pi/avs-device-sdk/SampleApp/inputs";
+// This is a 16 bit 16 kHz little endian linear PCM audio file of "de la cocina".
+static const std::string COCINA_AUDIO_FILE = "/Cocina.wav";
+// This is a 16 bit 16 kHz little endian linear PCM audio file of "del comedor".
+static const std::string COMEDOR_AUDIO_FILE = "/Comedor.wav";
+
+//CURL REQUEST
+static const std::string ALEXA_USER_ID("");
+static const std::string SKILL_MESSAGING_TOKEN(""); 
+static const std::string DATA_MESSAGE("");    //='{"data":{ "sampleMessage": "Sample Message"}, "expiresAfterSeconds": 60}'
+static const std::string AUTHORIZATION_HEADER("Authorization: Bearer " + SKILL_MESSAGING_TOKEN);
+static const std::string CONTENT_TYPE_HEADER("Content-Type: application/json");
+static const std::string URL("https://api.eu.amazonalexa.com/v1/skillmessages/users/" + ALEXA_USER_ID); 
 
 /**
  * Create a LogEntry using this file's TAG and the specified event string.
@@ -62,15 +113,12 @@ std::unique_ptr<PortAudioMicrophoneWrapper> PortAudioMicrophoneWrapper::create(
 }
 
 PortAudioMicrophoneWrapper::PortAudioMicrophoneWrapper(std::shared_ptr<AudioInputStream> stream) :
-        m_audioInputStream{stream},
-        m_paStream{nullptr},
-        m_isStreaming{false} {
+    m_audioInputStream{stream},
+    m_isStreaming{false} {
 }
 
 PortAudioMicrophoneWrapper::~PortAudioMicrophoneWrapper() {
-    Pa_StopStream(m_paStream);
-    Pa_CloseStream(m_paStream);
-    Pa_Terminate();
+    close(sockfd);
 }
 
 bool PortAudioMicrophoneWrapper::initialize() {
@@ -79,76 +127,40 @@ bool PortAudioMicrophoneWrapper::initialize() {
         ACSDK_CRITICAL(LX("Failed to create stream writer"));
         return false;
     }
-    PaError err;
-    err = Pa_Initialize();
-    if (err != paNoError) {
-        ACSDK_CRITICAL(LX("Failed to initialize PortAudio").d("errorCode", err));
-        return false;
-    }
 
-    PaTime suggestedLatency;
-    bool latencyInConfig = getConfigSuggestedLatency(suggestedLatency);
+    //UDP socket
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0); 
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+	servaddr.sin_addr.s_addr = INADDR_ANY;
+	servaddr.sin_port = htons(PORT);
 
-    if (!latencyInConfig) {
-        err = Pa_OpenDefaultStream(
-            &m_paStream,
-            NUM_INPUT_CHANNELS,
-            NUM_OUTPUT_CHANNELS,
-            paInt16,
-            SAMPLE_RATE,
-            PREFERRED_SAMPLES_PER_CALLBACK,
-            PortAudioCallback,
-            this);
-    } else {
-        ACSDK_INFO(
-            LX("PortAudio suggestedLatency has been configured to ").d("Seconds", std::to_string(suggestedLatency)));
+    bind(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
 
-        PaStreamParameters inputParameters;
-        std::memset(&inputParameters, 0, sizeof(inputParameters));
-        inputParameters.device = Pa_GetDefaultInputDevice();
-        inputParameters.channelCount = NUM_INPUT_CHANNELS;
-        inputParameters.sampleFormat = paInt16;
-        inputParameters.suggestedLatency = suggestedLatency;
-        inputParameters.hostApiSpecificStreamInfo = nullptr;
+    //Curl request
+  //  CURL* curl = curl_easy_init();
 
-        err = Pa_OpenStream(
-            &m_paStream,
-            &inputParameters,
-            nullptr,
-            SAMPLE_RATE,
-            PREFERRED_SAMPLES_PER_CALLBACK,
-            paNoFlag,
-            PortAudioCallback,
-            this);
-    }
-
-    if (err != paNoError) {
-        ACSDK_CRITICAL(LX("Failed to open PortAudio default stream").d("errorCode", err));
-        return false;
-    }
     return true;
 }
 
 bool PortAudioMicrophoneWrapper::startStreamingMicrophoneData() {
     ACSDK_INFO(LX(__func__));
     std::lock_guard<std::mutex> lock{m_mutex};
-    PaError err = Pa_StartStream(m_paStream);
-    if (err != paNoError) {
-        ACSDK_CRITICAL(LX("Failed to start PortAudio stream"));
-        return false;
-    }
+    
+    std::thread t1(receive, this);
+    t1.detach();
+
     m_isStreaming = true;
+
+    ACSDK_CRITICAL(LX("START"));
+
     return true;
 }
 
 bool PortAudioMicrophoneWrapper::stopStreamingMicrophoneData() {
     ACSDK_INFO(LX(__func__));
     std::lock_guard<std::mutex> lock{m_mutex};
-    PaError err = Pa_StopStream(m_paStream);
-    if (err != paNoError) {
-        ACSDK_CRITICAL(LX("Failed to stop PortAudio stream"));
-        return false;
-    }
+     
     m_isStreaming = false;
     return true;
 }
@@ -157,37 +169,233 @@ bool PortAudioMicrophoneWrapper::isStreaming() {
     return m_isStreaming;
 }
 
-int PortAudioMicrophoneWrapper::PortAudioCallback(
-    const void* inputBuffer,
-    void* outputBuffer,
-    unsigned long numSamples,
-    const PaStreamCallbackTimeInfo* timeInfo,
-    PaStreamCallbackFlags statusFlags,
-    void* userData) {
-    PortAudioMicrophoneWrapper* wrapper = static_cast<PortAudioMicrophoneWrapper*>(userData);
-    ssize_t returnCode = wrapper->m_writer->write(inputBuffer, numSamples);
-    if (returnCode <= 0) {
-        ACSDK_CRITICAL(LX("Failed to write to stream."));
-        return paAbort;
+std::vector<int16_t> PortAudioMicrophoneWrapper::readAudioFromWav(const std::string& fileName, const int& headerPosition, bool* errorOccurred) {
+    std::ifstream inputFile(fileName.c_str(), std::ifstream::binary);
+    if (!inputFile.good()) {
+        std::cout << "Couldn't open audio file!" << std::endl;
+        if (errorOccurred) {
+            *errorOccurred = true;
+        }
+        return {};
     }
-    return paContinue;
-}
+    inputFile.seekg(0, std::ios::end);
+    int fileLengthInBytes = inputFile.tellg();
 
-bool PortAudioMicrophoneWrapper::getConfigSuggestedLatency(PaTime& suggestedLatency) {
-    bool latencyInConfig = false;
-    auto config = avsCommon::utils::configuration::ConfigurationNode::getRoot()[SAMPLE_APP_CONFIG_ROOT_KEY]
-                                                                               [PORTAUDIO_CONFIG_ROOT_KEY];
-    if (config) {
-        latencyInConfig = config.getValue(
-            PORTAUDIO_CONFIG_SUGGESTED_LATENCY_KEY,
-            &suggestedLatency,
-            suggestedLatency,
-            &rapidjson::Value::IsDouble,
-            &rapidjson::Value::GetDouble);
+    if (fileLengthInBytes <= headerPosition) {
+        std::cout << "File should be larger than header position" << std::endl;
+        if (errorOccurred) {
+            *errorOccurred = true;
+        }
+        return {};
     }
 
-    return latencyInConfig;
+    inputFile.seekg(headerPosition, std::ios::beg);
+
+    int numSamples = (fileLengthInBytes - headerPosition) / sizeof(int16_t);
+
+    std::vector<int16_t> retVal(numSamples, 0);
+
+    inputFile.read((char*)&retVal[0], numSamples * sizeof(int16_t));
+
+    if (static_cast<size_t>(inputFile.gcount()) != numSamples * sizeof(int16_t)) {
+        std::cout << "Error reading audio file" << std::endl;
+        if (errorOccurred) {
+            *errorOccurred = true;
+        }
+        return {};
+    }
+
+    inputFile.close();
+    if (errorOccurred) {
+        *errorOccurred = false;
+    }
+
+    std::cout << "File read successfully" << std::endl;
+
+    return retVal;
 }
+
+void PortAudioMicrophoneWrapper::onDialogUXStateChanged(DialogUXState state) {
+    if (!connected) return;
+    if (state == m_dialogState) return;
+    
+    m_dialogState = state;
+    uint8_t message[5] = {0};
+    message[0] = 20;
+    message[1] = 0;
+    
+    switch (m_dialogState){
+        case DialogUXState::LISTENING:
+            // Send UDP message about alexa listening
+            message[2] = (uint8_t) DialogUXState::LISTENING;
+            send_message(message, 3);
+            break;
+
+        case DialogUXState::SPEAKING:
+            // Send UDP message about alexa speaking
+            message[2] = (uint8_t) DialogUXState::SPEAKING;
+            send_message(message, 3);
+            break;
+
+        case DialogUXState::IDLE:
+            // Send UDP message about alexa speaking
+            message[2] = (uint8_t) DialogUXState::IDLE;
+            send_message(message, 3);
+            break;
+
+        case DialogUXState::EXPECTING:
+            return;
+        case DialogUXState::THINKING:
+            return;
+        /*
+            * This is an intermediate state after a SPEAK directive is completed. In the case of a speech burst the
+            * next SPEAK could kick in or if its the last SPEAK directive ALEXA moves to the IDLE state. So we do
+            * nothing for this state.
+            */
+        case DialogUXState::FINISHED:
+            return;
+    }
+}
+
+void PortAudioMicrophoneWrapper::receive(void* userData){ 
+    PortAudioMicrophoneWrapper* wrapper = static_cast<PortAudioMicrophoneWrapper*>(userData); 
+
+    uint8_t udp_payload[641] = {0};
+
+    // while (!wrapper->connect()){
+    //     sleep(1);
+    //     memset(payload, 0, sizeof(uint16_t)*320);
+    //     ssize_t returnCode = wrapper->m_writer->write(payload, 320); 
+    //     if (returnCode <= 0) {
+    //         ACSDK_CRITICAL(LX("Failed to write to stream."));
+    //     }
+    // }
+
+    while(1){
+        
+        dataRecv = 1;
+	    int frames = 0;
+        uint8_t command;
+
+        dataRecv = recvfrom(sockfd, udp_payload, 641, MSG_DONTWAIT, &sender, &len);
+        command = udp_payload[0];
+
+        if (command == 0 && dataRecv > 0) {
+            ACSDK_INFO(LX("Incoming audio."));
+
+            while(command  != 1){
+                dataRecv = recvfrom(sockfd, udp_payload, 641, 0, &sender, &len);
+                if (dataRecv < 0) {
+                    ACSDK_CRITICAL(LX("Error during audio transmission"));
+                    break;
+                }
+                command = udp_payload[0];
+
+                if(command == 2) {
+                    frames++;
+                    memcpy(payload, &udp_payload[1], sizeof(uint16_t)*320);
+                    ssize_t returnCode = wrapper->m_writer->write(payload, 320);
+                    if (returnCode <= 0) {
+                        ACSDK_CRITICAL(LX("Failed to write to stream."));
+                    }
+                }
+                // sleep(0.02);
+            }
+        }
+        if (frames > 0) {
+	        std::cout << "Got " << frames << " frames" << std::endl;
+        }
+
+        sleep(1); 
+        memset(payload, 0, sizeof(uint16_t)*320);
+        ssize_t returnCode = wrapper->m_writer->write(payload, 320);    
+        if (returnCode <= 0) {
+            ACSDK_CRITICAL(LX("Failed to write to stream."));
+        }
+        
+
+        // ADDING WAV FILE
+        /*
+        dataRecv = 1;
+        previous_udp = false;
+
+        PortAudioMicrophoneWrapper* wrapper = static_cast<PortAudioMicrophoneWrapper*>(userData); 
+
+        while(dataRecv > 0){
+            dataRecv = recvfrom(sockfd, payload, 640, MSG_DONTWAIT, &sender, &len);
+            if(previous_udp && dataRecv <= 0){
+                sleep(0.3);
+                dataRecv = recvfrom(sockfd, payload, 640, MSG_DONTWAIT, &sender, &len);
+            }    
+            if(dataRecv > 0){
+                ACSDK_CRITICAL(LX("RECEIVE AUDIO ESP32")); 
+                previous_udp = true;
+                wrapper->m_writer->write(payload, 320);
+            }     
+            else{
+                ACSDK_CRITICAL(LX("NO UDP")); 
+                if(previous_udp){
+                    bool error;
+                    std::string file = wav_path + COCINA_AUDIO_FILE;
+                    std::vector<int16_t> audioData = readAudioFromWav(file, RIFF_HEADER_SIZE, &error);
+                    sleep(0.5);
+                    wrapper->m_writer->write(audioData.data(), audioData.size());
+                }  else     wrapper->m_writer->write(payload, 320); 
+                previous_udp = false;   
+            }       
+        }
+        sleep(1); */
+        
+        
+    }   
+}
+
+void PortAudioMicrophoneWrapper::report(const char* msg, int terminate) {
+  perror(msg);
+  if (terminate) exit(-1); /* failure */
+}
+
+int PortAudioMicrophoneWrapper::disconnect() {
+    ACSDK_INFO(LX("Disconecting"));
+    close(m_sock); /* close the connection */
+    return 0;
+}
+
+int PortAudioMicrophoneWrapper::connect() {
+    // Setup the msock
+    sockaddr_in m_addr;
+    memset(&m_addr, 0, sizeof(m_addr));
+    m_sock = socket(AF_INET, SOCK_STREAM, 0);
+
+    int on = 1;
+    if (setsockopt(m_sock, SOL_SOCKET, SO_REUSEADDR, (const char*) &on, sizeof(on)) == -1) {
+        return false;
+    }
+
+    // Connect //
+    m_addr.sin_family = AF_INET;
+    m_addr.sin_port = htons(PORT);
+    int status = inet_pton(AF_INET, host.c_str(), &m_addr.sin_addr);
+
+    std::cout << "Status After inet_pton: " << status << " # " << m_addr.sin_addr.s_addr << std::endl;
+    if (errno == EAFNOSUPPORT) {
+        std::cout << "Failed with errno: " << errno << std::endl;
+        return false;
+    }
+    status = ::connect(m_sock, (sockaddr *) &m_addr, sizeof(m_addr));
+    if (status == -1) {
+        std::cout << "Failed with status: " << status << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+int PortAudioMicrophoneWrapper::send_message(uint8_t *data, size_t length) {
+    ACSDK_INFO(LX("Sending message to server"));
+    return ::send(m_sock, data, length, 0);
+}
+
 
 }  // namespace sampleApp
 }  // namespace alexaClientSDK
