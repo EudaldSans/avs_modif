@@ -67,6 +67,7 @@ int m_sock;
 int16_t *payload[51200];
 
 bool connected = false;
+bool isReceiving = false;
 
 bool previous_udp = false;
 static const int RIFF_HEADER_SIZE = 44;
@@ -149,6 +150,9 @@ bool PortAudioMicrophoneWrapper::startStreamingMicrophoneData() {
     
     std::thread t1(receive, this);
     t1.detach();
+
+    std::thread t2(fillAudioBuffer, this);
+    t2.detach();
 
     m_isStreaming = true;
 
@@ -257,96 +261,78 @@ void PortAudioMicrophoneWrapper::onDialogUXStateChanged(DialogUXState state) {
     }
 }
 
+void PortAudioMicrophoneWrapper::fillAudioBuffer(void* userData) {
+    PortAudioMicrophoneWrapper* wrapper = static_cast<PortAudioMicrophoneWrapper*>(userData);
+
+    while(1) {
+        while(isReceiving); // FIXME: Is there a need for an active wait here?
+        sleep(1);
+
+        memset(payload, 0, sizeof(uint16_t)*320);
+        ssize_t returnCode = wrapper->m_writer->write(payload, 320); 
+        if (returnCode <= 0) {
+            ACSDK_CRITICAL(LX("Failed to write blanks to stream."));
+        }
+    }
+}
+
 void PortAudioMicrophoneWrapper::receive(void* userData){ 
     PortAudioMicrophoneWrapper* wrapper = static_cast<PortAudioMicrophoneWrapper*>(userData); 
 
-    uint8_t udp_payload[641] = {0};
+    uint8_t udp_payload[642] = {0};
+    int frames = 0, expected_number_of_frames = 0;
+    // uint8_t expected_sequence_number;
+    MessageCommand command;
+    ssize_t returnCode;
 
-    // while (!wrapper->connect()){
-    //     sleep(1);
-    //     memset(payload, 0, sizeof(uint16_t)*320);
-    //     ssize_t returnCode = wrapper->m_writer->write(payload, 320); 
-    //     if (returnCode <= 0) {
-    //         ACSDK_CRITICAL(LX("Failed to write to stream."));
-    //     }
-    // }
+    while (!wrapper->connect()){
+        sleep(1);
+    }
 
     while(1){
-        
-        dataRecv = 1;
-	    int frames = 0;
-        uint8_t command;
+        dataRecv = recvfrom(m_sock, udp_payload, 642, 0, &sender, &len);
+        command = static_cast<MessageCommand>(udp_payload[0]);
+        expected_number_of_frames = udp_payload[1];
 
-        dataRecv = recvfrom(sockfd, udp_payload, 641, MSG_DONTWAIT, &sender, &len);
-        command = udp_payload[0];
+        if (dataRecv <= 0) {
+            ACSDK_CRITICAL(LX("Error during audio reception"));
+            continue; // TODO: Should reset socket?
+        }
 
-        if (command == 0 && dataRecv > 0) {
-            ACSDK_INFO(LX("Incoming audio."));
+        switch (command) {
+            case MessageCommand::AudioIncoming:
+                ACSDK_INFO(LX("Incoming audio."));
 
-            while(command  != 1){
-                dataRecv = recvfrom(sockfd, udp_payload, 641, 0, &sender, &len);
-                if (dataRecv < 0) {
-                    ACSDK_CRITICAL(LX("Error during audio transmission"));
-                    break;
+                expected_number_of_frames = udp_payload[1];
+
+                frames = 0;
+                // expected_sequence_number = 0;
+                isReceiving = true;
+
+                break;
+            
+            case MessageCommand::AudioFrame: // TODO: Request for lost messages?
+                frames++;
+
+                // expected_sequence_number = udp_payload[1];
+                // memcpy(payload, &udp_payload[2], sizeof(uint16_t)*320);
+                returnCode = wrapper->m_writer->write(&udp_payload[2], 320); 
+                if (returnCode <= 0) {
+                    ACSDK_CRITICAL(LX("Failed to write audio to stream."));
                 }
-                command = udp_payload[0];
 
-                if(command == 2) {
-                    frames++;
-                    memcpy(payload, &udp_payload[1], sizeof(uint16_t)*320);
-                    ssize_t returnCode = wrapper->m_writer->write(payload, 320);
-                    if (returnCode <= 0) {
-                        ACSDK_CRITICAL(LX("Failed to write to stream."));
-                    }
-                }
-                // sleep(0.02);
-            }
+                break;
+            
+            case MessageCommand::AudioFinished:
+                ACSDK_INFO(LX("Finished receiving audio.").d("frames_received", frames).d("expected_frames", expected_number_of_frames));
+                isReceiving = false;
+
+                break;
+
+            case MessageCommand::StateChange:
+                // Should never happen.
+                break;            
         }
-        if (frames > 0) {
-	        std::cout << "Got " << frames << " frames" << std::endl;
-        }
-
-        sleep(1); 
-        memset(payload, 0, sizeof(uint16_t)*320);
-        ssize_t returnCode = wrapper->m_writer->write(payload, 320);    
-        if (returnCode <= 0) {
-            ACSDK_CRITICAL(LX("Failed to write to stream."));
-        }
-        
-
-        // ADDING WAV FILE
-        /*
-        dataRecv = 1;
-        previous_udp = false;
-
-        PortAudioMicrophoneWrapper* wrapper = static_cast<PortAudioMicrophoneWrapper*>(userData); 
-
-        while(dataRecv > 0){
-            dataRecv = recvfrom(sockfd, payload, 640, MSG_DONTWAIT, &sender, &len);
-            if(previous_udp && dataRecv <= 0){
-                sleep(0.3);
-                dataRecv = recvfrom(sockfd, payload, 640, MSG_DONTWAIT, &sender, &len);
-            }    
-            if(dataRecv > 0){
-                ACSDK_CRITICAL(LX("RECEIVE AUDIO ESP32")); 
-                previous_udp = true;
-                wrapper->m_writer->write(payload, 320);
-            }     
-            else{
-                ACSDK_CRITICAL(LX("NO UDP")); 
-                if(previous_udp){
-                    bool error;
-                    std::string file = wav_path + COCINA_AUDIO_FILE;
-                    std::vector<int16_t> audioData = readAudioFromWav(file, RIFF_HEADER_SIZE, &error);
-                    sleep(0.5);
-                    wrapper->m_writer->write(audioData.data(), audioData.size());
-                }  else     wrapper->m_writer->write(payload, 320); 
-                previous_udp = false;   
-            }       
-        }
-        sleep(1); */
-        
-        
     }   
 }
 

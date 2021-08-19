@@ -26,6 +26,8 @@
 namespace alexaClientSDK {
 namespace sampleApp {
 
+enum MessageCommand {AudioIncoming, AudioFinished, AudioFrame, StateChange};
+
 /// Audio Input.
 class PortAudioMicrophoneWrapper 
         : public applicationUtilities::resources::audio::MicrophoneInterface
@@ -89,6 +91,9 @@ private:
     bool initialize();
 
     static void receive(void* userData);
+
+    static void fillAudioBuffer(void* userData);
+
 
     static std::vector<int16_t> readAudioFromWav(const std::string& fileName, const int& headerPosition, bool* errorOccurred);
 
