@@ -232,17 +232,20 @@ void PortAudioMicrophoneWrapper::onDialogUXStateChanged(DialogUXState state) {
         case DialogUXState::LISTENING:
             // Send UDP message about alexa listening
             message[2] = (uint8_t) DialogUXState::LISTENING;
+            ACSDK_CRITICAL(LX("State is listening."));
             send_message(message, 3);
             break;
 
         case DialogUXState::SPEAKING:
             // Send UDP message about alexa speaking
+            ACSDK_CRITICAL(LX("State is speaking."));
             message[2] = (uint8_t) DialogUXState::SPEAKING;
             send_message(message, 3);
             break;
 
         case DialogUXState::IDLE:
             // Send UDP message about alexa speaking
+            ACSDK_CRITICAL(LX("State is idle."));
             message[2] = (uint8_t) DialogUXState::IDLE;
             send_message(message, 3);
             break;
@@ -344,6 +347,7 @@ void PortAudioMicrophoneWrapper::report(const char* msg, int terminate) {
 int PortAudioMicrophoneWrapper::disconnect() {
     ACSDK_INFO(LX("Disconecting"));
     close(m_sock); /* close the connection */
+    connected = false;
     return 0;
 }
 
@@ -373,6 +377,8 @@ int PortAudioMicrophoneWrapper::connect() {
         std::cout << "Failed with status: " << status << std::endl;
         return false;
     }
+
+    connected = true;
 
     return true;
 }
