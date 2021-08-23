@@ -44,6 +44,7 @@
 #include "SampleApp/ConsolePrinter.h"
 
 #define MAX_AUDIO_FRAME_SIZE 642
+#define ALEXA_SIGNATURE 20
 
 namespace alexaClientSDK {
 namespace sampleApp {
@@ -227,7 +228,7 @@ void PortAudioMicrophoneWrapper::onDialogUXStateChanged(DialogUXState state) {
     
     m_dialogState = state;
     uint8_t message[5] = {0};
-    message[0] = 20;
+    message[0] = ALEXA_SIGNATURE;
     message[1] = MessageCommand::StateChange;
     
     switch (m_dialogState){
@@ -291,7 +292,8 @@ void PortAudioMicrophoneWrapper::receive(void* userData){
     PortAudioMicrophoneWrapper* wrapper = static_cast<PortAudioMicrophoneWrapper*>(userData); 
 
     uint8_t udp_payload[MAX_AUDIO_FRAME_SIZE] = {0};
-    int frames = 0, expected_number_of_frames = 0;
+    int frames = 0, expected_number_of_frames = 0, fragmented_packet_length;
+    bool fragmented_packet = false;
     // uint8_t expected_sequence_number;
     MessageCommand command;
     ssize_t returnCode;
@@ -307,6 +309,28 @@ void PortAudioMicrophoneWrapper::receive(void* userData){
             ACSDK_CRITICAL(LX("Error during audio reception, resetting socket"));
             wrapper->disconnect();
             wrapper->connect();
+            continue;
+        }
+
+        if (fragmented_packet) {
+            fragmented_packet_length = dataRecv + fragmented_packet_length;
+
+            // TODO: Filter fragmented packets, do something if a start of a new packet is detected
+
+            if (fragmented_packet_length > MAX_AUDIO_FRAME_SIZE) {
+                ACSDK_INFO(LX("Received the start of a new packet with a fragmented packet"));
+                returnCode = wrapper->m_writer->write(&udp_payload[MAX_AUDIO_FRAME_SIZE - fragmented_packet_length], (dataRecv - 2)/2);
+                
+            }
+
+            if (fragmented_packet_length < MAX_AUDIO_FRAME_SIZE) {
+
+            }
+
+        }
+
+        if (assistant_signature != ALEXA_SIGNATURE) {
+            ACSDK_WARN(LX("Received signature for another assistant").d("signature", assistant_signature));
             continue;
         }
 
@@ -333,9 +357,11 @@ void PortAudioMicrophoneWrapper::receive(void* userData){
             case MessageCommand::AudioFrame: // TODO: Request for lost messages?
                 frames++;
 
-                // expected_sequence_number = udp_payload[1];
-                // memcpy(payload, &udp_payload[2], sizeof(uint16_t)*320);
-                returnCode = wrapper->m_writer->write(&udp_payload[2], 320); 
+                if (dataRecv < MAX_AUDIO_FRAME_SIZE) {
+                    fragmented_packet = true;
+                    fragmented_packet_length = dataRecv
+                }
+                returnCode = wrapper->m_writer->write(&udp_payload[2], (dataRecv - 2)/2); 
                 if (returnCode <= 0) {
                     ACSDK_CRITICAL(LX("Failed to write audio to stream."));
                 }
