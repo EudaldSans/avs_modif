@@ -43,6 +43,8 @@
 #include "SampleApp/PortAudioMicrophoneWrapper.h"
 #include "SampleApp/ConsolePrinter.h"
 
+#define MAX_AUDIO_FRAME_SIZE 642
+
 namespace alexaClientSDK {
 namespace sampleApp {
 
@@ -226,41 +228,47 @@ void PortAudioMicrophoneWrapper::onDialogUXStateChanged(DialogUXState state) {
     m_dialogState = state;
     uint8_t message[5] = {0};
     message[0] = 20;
-    message[1] = 0;
+    message[1] = MessageCommand::StateChange;
     
     switch (m_dialogState){
         case DialogUXState::LISTENING:
-            // Send UDP message about alexa listening
             message[2] = (uint8_t) DialogUXState::LISTENING;
             ACSDK_CRITICAL(LX("State is listening."));
             send_message(message, 3);
             break;
 
         case DialogUXState::SPEAKING:
-            // Send UDP message about alexa speaking
             ACSDK_CRITICAL(LX("State is speaking."));
             message[2] = (uint8_t) DialogUXState::SPEAKING;
             send_message(message, 3);
             break;
 
         case DialogUXState::IDLE:
-            // Send UDP message about alexa speaking
             ACSDK_CRITICAL(LX("State is idle."));
             message[2] = (uint8_t) DialogUXState::IDLE;
             send_message(message, 3);
             break;
 
         case DialogUXState::EXPECTING:
+            ACSDK_CRITICAL(LX("State is expecting."));
+            message[2] = (uint8_t) DialogUXState::EXPECTING;
+            send_message(message, 3);
             return;
         case DialogUXState::THINKING:
-            return;
-        /*
+            ACSDK_CRITICAL(LX("State is thinking."));
+            message[2] = (uint8_t) DialogUXState::THINKING;
+            send_message(message, 3);
+            return;        
+        case DialogUXState::FINISHED:
+            /*
             * This is an intermediate state after a SPEAK directive is completed. In the case of a speech burst the
             * next SPEAK could kick in or if its the last SPEAK directive ALEXA moves to the IDLE state. So we do
             * nothing for this state.
             */
-        case DialogUXState::FINISHED:
-            return;
+            ACSDK_CRITICAL(LX("State is finished."));
+            message[2] = (uint8_t) DialogUXState::FINISHED;
+            send_message(message, 3);
+            return;    
     }
 }
 
@@ -282,35 +290,43 @@ void PortAudioMicrophoneWrapper::fillAudioBuffer(void* userData) {
 void PortAudioMicrophoneWrapper::receive(void* userData){ 
     PortAudioMicrophoneWrapper* wrapper = static_cast<PortAudioMicrophoneWrapper*>(userData); 
 
-    uint8_t udp_payload[642] = {0};
+    uint8_t udp_payload[MAX_AUDIO_FRAME_SIZE] = {0};
     int frames = 0, expected_number_of_frames = 0;
     // uint8_t expected_sequence_number;
     MessageCommand command;
     ssize_t returnCode;
 
-    while (!wrapper->connect()){
-        sleep(1);
-    }
+    wrapper->connect();
 
     while(1){
-        dataRecv = recvfrom(m_sock, udp_payload, 642, 0, &sender, &len);
-        command = static_cast<MessageCommand>(udp_payload[0]);
-        expected_number_of_frames = udp_payload[1];
+        dataRecv = recvfrom(m_sock, udp_payload, MAX_AUDIO_FRAME_SIZE, 0, &sender, &len);
+        int assistant_signature = udp_payload[0];
+        command = static_cast<MessageCommand>(udp_payload[1]);
 
         if (dataRecv <= 0) {
-            ACSDK_CRITICAL(LX("Error during audio reception"));
-            continue; // TODO: Should reset socket?
+            ACSDK_CRITICAL(LX("Error during audio reception, resetting socket"));
+            wrapper->disconnect();
+            wrapper->connect();
+            continue;
         }
 
+        ACSDK_INFO(LX("New message.").d("signature", assistant_signature).d("command", command).d("len", dataRecv));
         switch (command) {
+            
             case MessageCommand::AudioIncoming:
                 ACSDK_INFO(LX("Incoming audio."));
 
-                expected_number_of_frames = udp_payload[1];
+                expected_number_of_frames = udp_payload[3];
 
                 frames = 0;
                 // expected_sequence_number = 0;
                 isReceiving = true;
+
+                break;
+
+            case MessageCommand::AudioFinished:
+                ACSDK_INFO(LX("Finished receiving audio.").d("frames_received", frames).d("expected_frames", expected_number_of_frames));
+                isReceiving = false;
 
                 break;
             
@@ -325,16 +341,12 @@ void PortAudioMicrophoneWrapper::receive(void* userData){
                 }
 
                 break;
-            
-            case MessageCommand::AudioFinished:
-                ACSDK_INFO(LX("Finished receiving audio.").d("frames_received", frames).d("expected_frames", expected_number_of_frames));
-                isReceiving = false;
-
-                break;
 
             case MessageCommand::StateChange:
                 // Should never happen.
-                break;            
+                break;   
+            default:
+                ACSDK_INFO(LX("Got to default").d("command", command));
         }
     }   
 }
@@ -354,31 +366,35 @@ int PortAudioMicrophoneWrapper::disconnect() {
 int PortAudioMicrophoneWrapper::connect() {
     // Setup the msock
     sockaddr_in m_addr;
-    memset(&m_addr, 0, sizeof(m_addr));
-    m_sock = socket(AF_INET, SOCK_STREAM, 0);
+    while (!connected) {
+        sleep(1);
+        memset(&m_addr, 0, sizeof(m_addr));
+        m_sock = socket(AF_INET, SOCK_STREAM, 0);
 
-    int on = 1;
-    if (setsockopt(m_sock, SOL_SOCKET, SO_REUSEADDR, (const char*) &on, sizeof(on)) == -1) {
-        return false;
+        int on = 1;
+        if (setsockopt(m_sock, SOL_SOCKET, SO_REUSEADDR, (const char*) &on, sizeof(on)) == -1) {
+            std::cout << "Could not set up socket " << std::endl;
+            continue;
+        }
+
+        // Connect //
+        m_addr.sin_family = AF_INET;
+        m_addr.sin_port = htons(PORT);
+        int status = inet_pton(AF_INET, host.c_str(), &m_addr.sin_addr);
+
+        if (errno == EAFNOSUPPORT) {
+            std::cout << "Failed with errno: " << errno << std::endl;
+            continue;
+        }
+        status = ::connect(m_sock, (sockaddr *) &m_addr, sizeof(m_addr));
+        if (status == -1) {
+            continue;
+        }
+
+        connected = true;
     }
 
-    // Connect //
-    m_addr.sin_family = AF_INET;
-    m_addr.sin_port = htons(PORT);
-    int status = inet_pton(AF_INET, host.c_str(), &m_addr.sin_addr);
-
-    std::cout << "Status After inet_pton: " << status << " # " << m_addr.sin_addr.s_addr << std::endl;
-    if (errno == EAFNOSUPPORT) {
-        std::cout << "Failed with errno: " << errno << std::endl;
-        return false;
-    }
-    status = ::connect(m_sock, (sockaddr *) &m_addr, sizeof(m_addr));
-    if (status == -1) {
-        std::cout << "Failed with status: " << status << std::endl;
-        return false;
-    }
-
-    connected = true;
+    ACSDK_INFO(LX("Connected."));
 
     return true;
 }
