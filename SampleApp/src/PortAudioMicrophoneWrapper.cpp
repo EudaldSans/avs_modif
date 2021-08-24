@@ -343,8 +343,6 @@ start:
             case MessageCommand::AudioIncoming:
                 ACSDK_INFO(LX("Incoming audio."));
 
-                expected_number_of_frames = payload[3];
-
                 frames = 0;
                 // expected_sequence_number = 0;
                 isReceiving = true;
@@ -352,6 +350,7 @@ start:
                 break;
 
             case MessageCommand::AudioFinished:
+                expected_number_of_frames = payload[4];
                 ACSDK_INFO(LX("Finished receiving audio.").d("frames_received", frames).d("expected_frames", expected_number_of_frames));
                 isReceiving = false;
 
