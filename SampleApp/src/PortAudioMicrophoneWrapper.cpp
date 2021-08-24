@@ -293,7 +293,7 @@ void PortAudioMicrophoneWrapper::receive(void* userData){
 
     uint8_t payload[MAX_AUDIO_FRAME_SIZE] = {0}, fragmented_payload[MAX_AUDIO_FRAME_SIZE] = {0};
     uint8_t assistant_signature;
-    uint16_t message_length, position;
+    uint16_t message_length, position, total_length;
     int frames = 0, expected_number_of_frames = 0, remaining_length;
     // uint8_t expected_sequence_number;
     MessageCommand command;
@@ -302,21 +302,29 @@ void PortAudioMicrophoneWrapper::receive(void* userData){
 start:
     wrapper->connect();
 
+    memset(payload, 0, MAX_AUDIO_FRAME_SIZE);
+    message_length = 0;
+    remaining_length = 0;
+
     while(1){
-        memset(payload, 0, MAX_AUDIO_FRAME_SIZE);
-        message_length = 0;
-        remaining_length = 0;
+
 
         dataRecv = recvfrom(m_sock, payload, MAX_AUDIO_FRAME_SIZE, 0, &sender, &len);
         if (dataRecv <= 0) {
             wrapper->disconnect();
             goto start;
         }
+
+        total_length = dataRecv;
+        position = dataRecv;
+
+process_new_packet:        
+
         assistant_signature = payload[0];
         command = static_cast<MessageCommand>(payload[1]);
         message_length = (payload[2] << 8) | (payload[3]);
-        remaining_length = message_length - dataRecv;
-        position = dataRecv;
+
+        remaining_length = message_length - total_length;
 
         while (remaining_length > 0) {
             ACSDK_INFO(LX("Received a fragmented packet").d("message_length", message_length).d("remaining_length", remaining_length));
@@ -330,6 +338,7 @@ start:
             memcpy(&payload[position], fragmented_payload, dataRecv);
             remaining_length = remaining_length - dataRecv;
             position = position + dataRecv;
+            total_length = total_length + dataRecv;
         }
 
         if (assistant_signature != ALEXA_SIGNATURE) {
@@ -350,7 +359,7 @@ start:
                 break;
 
             case MessageCommand::AudioFinished:
-                expected_number_of_frames = payload[4];
+                expected_number_of_frames = payload[4] << 8 | payload[5];
                 ACSDK_INFO(LX("Finished receiving audio.").d("frames_received", frames).d("expected_frames", expected_number_of_frames));
                 isReceiving = false;
 
@@ -370,6 +379,14 @@ start:
                 break;   
             default:
                 ACSDK_INFO(LX("Got to default").d("command", command));
+        }
+
+        if (total_length > message_length) {
+            ACSDK_INFO(LX("Received more than one packet").d("message_length", message_length).d("total_length", total_length));
+            memmove(payload, &payload[message_length], MAX_AUDIO_FRAME_SIZE - message_length);
+
+            total_length = total_length - message_length;
+            goto process_new_packet;
         }
     }   
 }
