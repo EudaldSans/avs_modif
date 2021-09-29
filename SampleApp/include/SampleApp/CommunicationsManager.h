@@ -4,9 +4,8 @@
 #include <mutex>
 #include <thread>
 
-#include <AVSCommon/AVS/AudioInputStream.h>
 #include <AVSCommon/SDKInterfaces/DialogUXStateObserverInterface.h>
-#include <Audio/MicrophoneInterface.h>
+#include <SampleApp/PortAudioMicrophoneWrapper.h>
 
 namespace alexaClientSDK {
 namespace sampleApp {
@@ -23,7 +22,7 @@ public:
      * @param stream The shared data stream to write to.
      * @return A unique_ptr to a @c CommunicationsManager if creation was successful and @c nullptr otherwise.
      */
-    static std::unique_ptr<CommunicationsManager> create(std::shared_ptr<avsCommon::avs::AudioInputStream> stream);
+    static std::unique_ptr<CommunicationsManager> create(std::shared_ptr<alexaClientSDK::sampleApp::PortAudioMicrophoneWrapper> wrapper);
 
     /// @name DialogUxStateObserverInetrface methods.
     /// @{
