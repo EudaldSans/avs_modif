@@ -276,7 +276,7 @@ void PortAudioMicrophoneWrapper::onDialogUXStateChanged(DialogUXState state) {
 void PortAudioMicrophoneWrapper::fillAudioBuffer(void* userData) {
     PortAudioMicrophoneWrapper* wrapper = static_cast<PortAudioMicrophoneWrapper*>(userData);
 
-    while(1) {
+    while(wrapper->m_isStreaming) {
         while(isReceiving); // FIXME: Is there a need for an active wait here?
         sleep(1);
 
