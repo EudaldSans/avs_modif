@@ -3,6 +3,7 @@ list(APPEND LibSampleApp_SOURCES
         CaptionPresenter.cpp
         ConsolePrinter.cpp
         ConsoleReader.cpp
+        CommunicationsManager.cpp
         ExternalCapabilitiesBuilder.cpp
         GuiRenderer.cpp
         InteractionManager.cpp

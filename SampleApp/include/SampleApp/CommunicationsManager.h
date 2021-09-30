@@ -42,6 +42,13 @@ public:
     int run();
 
 private:
+        /**
+     * Constructor.
+     *
+     * @param stream The shared data stream to write to.
+     */
+    CommunicationsManager(std::shared_ptr<alexaClientSDK::sampleApp::PortAudioMicrophoneWrapper> wrapper);
+
     /// Initializes 
     bool initialize();
 

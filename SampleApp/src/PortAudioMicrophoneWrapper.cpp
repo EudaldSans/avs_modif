@@ -43,9 +43,6 @@
 #include "SampleApp/PortAudioMicrophoneWrapper.h"
 #include "SampleApp/ConsolePrinter.h"
 
-#define MAX_AUDIO_FRAME_SIZE 644
-#define ALEXA_SIGNATURE 20
-
 namespace alexaClientSDK {
 namespace sampleApp {
 
@@ -56,36 +53,6 @@ static const std::string PORTAUDIO_CONFIG_ROOT_KEY("portAudio");
 
 /// String to identify log entries originating from this file.
 static const std::string TAG("PortAudioMicrophoneWrapper");
-
-//UDP SOCKET 
-struct sockaddr_in servaddr;
-struct sockaddr sender;
-
-socklen_t len;
-static const int PORT = 3331;
-static const std::string host = "127.0.0.1"; 
-
-int sockfd, dataRecv = 0;
-int m_sock;
-int16_t *payload[51200];
-
-bool connected = false;
-bool isReceiving = false;
-
-bool previous_udp = false;
-static const int RIFF_HEADER_SIZE = 44;
-
-const char* books[] = {"War and Peace",
-                       "Pride and Prejudice",
-                       "The Sound and the Fury"};
-
-//FOR SKILL
-//Wav's path
-static std::string wav_path = "/home/pi/avs-device-sdk/SampleApp/inputs";
-// This is a 16 bit 16 kHz little endian linear PCM audio file of "de la cocina".
-static const std::string COCINA_AUDIO_FILE = "/Cocina.wav";
-// This is a 16 bit 16 kHz little endian linear PCM audio file of "del comedor".
-static const std::string COMEDOR_AUDIO_FILE = "/Comedor.wav";
 
 //CURL REQUEST
 static const std::string ALEXA_USER_ID("");
@@ -132,30 +99,15 @@ bool PortAudioMicrophoneWrapper::initialize() {
         return false;
     }
 
-    //UDP socket
-    sockfd = socket(AF_INET, SOCK_DGRAM, 0); 
-    bzero(&servaddr, sizeof(servaddr));
-    servaddr.sin_family = AF_INET;
-	servaddr.sin_addr.s_addr = INADDR_ANY;
-	servaddr.sin_port = htons(PORT);
-
-    bind(sockfd, (struct sockaddr*)&servaddr, sizeof(servaddr));
-
-    //Curl request
-  //  CURL* curl = curl_easy_init();
-
     return true;
 }
 
 bool PortAudioMicrophoneWrapper::startStreamingMicrophoneData() {
     ACSDK_INFO(LX(__func__));
     std::lock_guard<std::mutex> lock{m_mutex};
-    
-    std::thread t1(receive, this);
-    t1.detach();
 
-    std::thread t2(fillAudioBuffer, this);
-    t2.detach();
+    std::thread t1(fillAudioBuffer, this);
+    t1.detach();
 
     m_isStreaming = true;
 
@@ -223,54 +175,7 @@ std::vector<int16_t> PortAudioMicrophoneWrapper::readAudioFromWav(const std::str
 }
 
 void PortAudioMicrophoneWrapper::onDialogUXStateChanged(DialogUXState state) {
-    if (!connected) return;
-    if (state == m_dialogState) return;
-    
-    m_dialogState = state;
-    uint8_t message[5] = {0};
-    message[0] = ALEXA_SIGNATURE;
-    message[1] = MessageCommand::StateChange;
-    
-    switch (m_dialogState){
-        case DialogUXState::LISTENING:
-            message[2] = (uint8_t) DialogUXState::LISTENING;
-            ACSDK_CRITICAL(LX("State is listening."));
-            send_message(message, 3);
-            break;
-
-        case DialogUXState::SPEAKING:
-            ACSDK_CRITICAL(LX("State is speaking."));
-            message[2] = (uint8_t) DialogUXState::SPEAKING;
-            send_message(message, 3);
-            break;
-
-        case DialogUXState::IDLE:
-            ACSDK_CRITICAL(LX("State is idle."));
-            message[2] = (uint8_t) DialogUXState::IDLE;
-            send_message(message, 3);
-            break;
-
-        case DialogUXState::EXPECTING:
-            ACSDK_CRITICAL(LX("State is expecting."));
-            message[2] = (uint8_t) DialogUXState::EXPECTING;
-            send_message(message, 3);
-            return;
-        case DialogUXState::THINKING:
-            ACSDK_CRITICAL(LX("State is thinking."));
-            message[2] = (uint8_t) DialogUXState::THINKING;
-            send_message(message, 3);
-            return;        
-        case DialogUXState::FINISHED:
-            /*
-            * This is an intermediate state after a SPEAK directive is completed. In the case of a speech burst the
-            * next SPEAK could kick in or if its the last SPEAK directive ALEXA moves to the IDLE state. So we do
-            * nothing for this state.
-            */
-            ACSDK_CRITICAL(LX("State is finished."));
-            message[2] = (uint8_t) DialogUXState::FINISHED;
-            send_message(message, 3);
-            return;    
-    }
+    return;
 }
 
 void PortAudioMicrophoneWrapper::fillAudioBuffer(void* userData) {
