@@ -206,6 +206,9 @@ private:
     /// The @c UserInputManager which controls the client.
     std::shared_ptr<UserInputManager> m_userInputManager;
 
+    /// The @c CommunicationsManager which controls the client.
+    std::shared_ptr<CommunicationsManager> m_communicationsManager;
+
     /// The @c GuiRender which provides an abstraction to visual rendering
     std::shared_ptr<GuiRenderer> m_guiRenderer;
 
