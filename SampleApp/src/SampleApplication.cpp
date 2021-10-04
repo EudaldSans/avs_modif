@@ -708,6 +708,7 @@ SampleApplication::MediaPlayerRegistration::MediaPlayerRegistration(
 }
 
 SampleAppReturnCode SampleApplication::run() {
+    m_communicationsManager->initialize();
     return m_userInputManager->run();
 }
 
@@ -1628,6 +1629,15 @@ bool SampleApplication::initialize(
     authDelegate->addAuthObserver(m_userInputManager);
     client->addRegistrationObserver(m_userInputManager);
     m_capabilitiesDelegate->addCapabilitiesObserver(m_userInputManager);
+
+    m_communicationsManager = alexaClientSDK::sampleApp::CommunicationsManager::create(
+        m_interactionManager, micWrapper);
+    if (!m_communicationsManager) {
+        ACSDK_CRITICAL(LX("Failed to create CommunicationsManager!"));
+        return false;
+    }
+
+    client->addAlexaDialogStateObserver(m_communicationsManager);
 
 #ifdef AUTH_MANAGER
     m_authManager->setRegistrationManager(client->getRegistrationManager());

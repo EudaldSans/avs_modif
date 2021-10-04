@@ -25,6 +25,7 @@
 
 #include <AVSCommon/Utils/Configuration/ConfigurationNode.h>
 #include <AVSCommon/Utils/Logger/Logger.h>
+#include "SampleApp/CommunicationsManager.h"
 #include "SampleApp/ConsolePrinter.h"
 
 #define MAX_AUDIO_FRAME_SIZE 644
@@ -61,21 +62,27 @@ static const int RIFF_HEADER_SIZE = 44;
  */
 #define LX(event) alexaClientSDK::avsCommon::utils::logger::LogEntry(TAG, event)
 
-std::unique_ptr<CommunicationsManager> create(std::shared_ptr<alexaClientSDK::sampleApp::PortAudioMicrophoneWrapper> wrapper) {
+std::unique_ptr<CommunicationsManager> CommunicationsManager::create(
+    std::shared_ptr<InteractionManager> interactionManager,
+    std::shared_ptr<PortAudioMicrophoneWrapper> wrapper) {
     if (!wrapper) {
         ACSDK_CRITICAL(LX("Invalid microphone wrapper passed to CommunicationsManager"));
         return nullptr;
     }
-    std::unique_ptr<CommunicationsManager> communicationsManager(new CommunicationsManager(wrapper));
-    if (!communicationsManager->initialize()) {
-        ACSDK_CRITICAL(LX("Failed to initialize CommunicationsManager"));
+    if (!interactionManager) {
+        ACSDK_CRITICAL(LX("Invalid InteractionManager passed to UserInputManager"));
         return nullptr;
     }
-    return communicationsManager;
+
+    return std::unique_ptr<CommunicationsManager> (
+        new CommunicationsManager(interactionManager, wrapper));
 }
 
-CommunicationsManager::CommunicationsManager(std::shared_ptr<PortAudioMicrophoneWrapper> wrapper) :
-    m_audioInputStream{wrapper},
+CommunicationsManager::CommunicationsManager(
+    std::shared_ptr<InteractionManager> interactionManager,
+    std::shared_ptr<PortAudioMicrophoneWrapper> wrapper) :
+    m_interactionManager{interactionManager},
+    m_wrapper{wrapper},
     m_isStreaming{false} {
 }
 
@@ -151,7 +158,7 @@ void CommunicationsManager::onDialogUXStateChanged(DialogUXState state) {
 }
 
 void CommunicationsManager::receive(void* userData){ 
-    PortAudioMicrophoneWrapper* wrapper = static_cast<PortAudioMicrophoneWrapper*>(userData); 
+    CommunicationsManager* comsManager = static_cast<CommunicationsManager*>(userData); 
 
     uint8_t payload[MAX_AUDIO_FRAME_SIZE] = {0}, fragmented_payload[MAX_AUDIO_FRAME_SIZE] = {0};
     uint8_t assistant_signature;
@@ -162,7 +169,7 @@ void CommunicationsManager::receive(void* userData){
     ssize_t returnCode;
 
 start:
-    wrapper->connect();
+    comsManager->connect();
 
     memset(payload, 0, MAX_AUDIO_FRAME_SIZE);
     message_length = 0;
@@ -173,7 +180,7 @@ start:
 
         dataRecv = recvfrom(m_sock, payload, MAX_AUDIO_FRAME_SIZE, 0, &sender, &len);
         if (dataRecv <= 0) {
-            wrapper->disconnect();
+            comsManager->disconnect();
             goto start;
         }
 
@@ -193,7 +200,7 @@ process_new_packet:
             memset(fragmented_payload, 0, MAX_AUDIO_FRAME_SIZE);
             dataRecv = recvfrom(m_sock, fragmented_payload, MAX_AUDIO_FRAME_SIZE, 0, &sender, &len);
             if (dataRecv <= 0) {
-                wrapper->disconnect();
+                comsManager->disconnect();
                 goto start;
             }
 
@@ -229,7 +236,8 @@ process_new_packet:
             
             case MessageCommand::AudioFrame: // TODO: Request for lost messages?
                 frames++;
-                returnCode = wrapper->m_writer->write(&payload[4], 320); 
+                returnCode = 1;
+                // returnCode = wrapper->m_writer->write(&payload[4], 320); 
                 if (returnCode <= 0) {
                     ACSDK_CRITICAL(LX("Failed to write audio to stream."));
                 }

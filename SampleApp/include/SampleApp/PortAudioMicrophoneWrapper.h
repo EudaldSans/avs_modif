@@ -26,8 +26,6 @@
 namespace alexaClientSDK {
 namespace sampleApp {
 
-enum MessageCommand {AudioIncoming, AudioFinished, AudioFrame, StateChange};
-
 /// Audio Input.
 class PortAudioMicrophoneWrapper 
         : public applicationUtilities::resources::audio::MicrophoneInterface

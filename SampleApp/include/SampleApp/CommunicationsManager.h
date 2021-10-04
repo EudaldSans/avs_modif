@@ -6,6 +6,7 @@
 
 #include <AVSCommon/SDKInterfaces/DialogUXStateObserverInterface.h>
 #include <SampleApp/PortAudioMicrophoneWrapper.h>
+#include "InteractionManager.h"
 
 namespace alexaClientSDK {
 namespace sampleApp {
@@ -22,7 +23,9 @@ public:
      * @param stream The shared data stream to write to.
      * @return A unique_ptr to a @c CommunicationsManager if creation was successful and @c nullptr otherwise.
      */
-    static std::unique_ptr<CommunicationsManager> create(std::shared_ptr<alexaClientSDK::sampleApp::PortAudioMicrophoneWrapper> wrapper);
+    static std::unique_ptr<CommunicationsManager> create(
+        std::shared_ptr<InteractionManager> interactionManager,
+        std::shared_ptr<alexaClientSDK::sampleApp::PortAudioMicrophoneWrapper> wrapper);
 
     /// @name DialogUxStateObserverInetrface methods.
     /// @{
@@ -39,7 +42,10 @@ public:
      *
      * @return Error code.
      */
-    int run();
+    // int run();
+
+    /// Initializes 
+    bool initialize();
 
 private:
         /**
@@ -47,12 +53,20 @@ private:
      *
      * @param stream The shared data stream to write to.
      */
-    CommunicationsManager(std::shared_ptr<alexaClientSDK::sampleApp::PortAudioMicrophoneWrapper> wrapper);
-
-    /// Initializes 
-    bool initialize();
+    CommunicationsManager(
+        std::shared_ptr<InteractionManager> interactionManager,
+        std::shared_ptr<PortAudioMicrophoneWrapper> wrapper);
 
     static void receive(void* userData);
+
+    /// The main interaction manager that interfaces with the SDK.
+    std::shared_ptr<InteractionManager> m_interactionManager;
+
+    /// The stream of audio data.
+    const std::shared_ptr<alexaClientSDK::sampleApp::PortAudioMicrophoneWrapper> m_wrapper;
+
+    /// Whether the microphone is currently streaming.
+    bool m_isStreaming;
 
     /**
      * Method to report errors.

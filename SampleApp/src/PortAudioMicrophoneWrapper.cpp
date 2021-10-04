@@ -62,6 +62,9 @@ static const std::string AUTHORIZATION_HEADER("Authorization: Bearer " + SKILL_M
 static const std::string CONTENT_TYPE_HEADER("Content-Type: application/json");
 static const std::string URL("https://api.eu.amazonalexa.com/v1/skillmessages/users/" + ALEXA_USER_ID); 
 
+
+bool isActive = false;
+
 /**
  * Create a LogEntry using this file's TAG and the specified event string.
  *
@@ -89,7 +92,6 @@ PortAudioMicrophoneWrapper::PortAudioMicrophoneWrapper(std::shared_ptr<AudioInpu
 }
 
 PortAudioMicrophoneWrapper::~PortAudioMicrophoneWrapper() {
-    close(sockfd);
 }
 
 bool PortAudioMicrophoneWrapper::initialize() {
@@ -180,9 +182,10 @@ void PortAudioMicrophoneWrapper::onDialogUXStateChanged(DialogUXState state) {
 
 void PortAudioMicrophoneWrapper::fillAudioBuffer(void* userData) {
     PortAudioMicrophoneWrapper* wrapper = static_cast<PortAudioMicrophoneWrapper*>(userData);
+    int16_t *payload[51200];
 
     while(wrapper->m_isStreaming) {
-        while(isReceiving); // FIXME: Is there a need for an active wait here?
+        while(isActive); // FIXME: Is there a need for an active wait here?
         sleep(1);
 
         memset(payload, 0, sizeof(uint16_t)*320);
@@ -191,162 +194,6 @@ void PortAudioMicrophoneWrapper::fillAudioBuffer(void* userData) {
             ACSDK_CRITICAL(LX("Failed to write blanks to stream."));
         }
     }
-}
-
-void PortAudioMicrophoneWrapper::receive(void* userData){ 
-    PortAudioMicrophoneWrapper* wrapper = static_cast<PortAudioMicrophoneWrapper*>(userData); 
-
-    uint8_t payload[MAX_AUDIO_FRAME_SIZE] = {0}, fragmented_payload[MAX_AUDIO_FRAME_SIZE] = {0};
-    uint8_t assistant_signature;
-    uint16_t message_length, position, total_length;
-    int frames = 0, expected_number_of_frames = 0, remaining_length;
-    // uint8_t expected_sequence_number;
-    MessageCommand command;
-    ssize_t returnCode;
-
-start:
-    wrapper->connect();
-
-    memset(payload, 0, MAX_AUDIO_FRAME_SIZE);
-    message_length = 0;
-    remaining_length = 0;
-
-    while(1){
-
-
-        dataRecv = recvfrom(m_sock, payload, MAX_AUDIO_FRAME_SIZE, 0, &sender, &len);
-        if (dataRecv <= 0) {
-            wrapper->disconnect();
-            goto start;
-        }
-
-        total_length = dataRecv;
-        position = dataRecv;
-
-process_new_packet:        
-
-        assistant_signature = payload[0];
-        command = static_cast<MessageCommand>(payload[1]);
-        message_length = (payload[2] << 8) | (payload[3]);
-
-        remaining_length = message_length - total_length;
-
-        while (remaining_length > 0) {
-            ACSDK_INFO(LX("Received a fragmented packet").d("message_length", message_length).d("remaining_length", remaining_length));
-            memset(fragmented_payload, 0, MAX_AUDIO_FRAME_SIZE);
-            dataRecv = recvfrom(m_sock, fragmented_payload, MAX_AUDIO_FRAME_SIZE, 0, &sender, &len);
-            if (dataRecv <= 0) {
-                wrapper->disconnect();
-                goto start;
-            }
-
-            memcpy(&payload[position], fragmented_payload, dataRecv);
-            remaining_length = remaining_length - dataRecv;
-            position = position + dataRecv;
-            total_length = total_length + dataRecv;
-        }
-
-        if (assistant_signature != ALEXA_SIGNATURE) {
-            ACSDK_WARN(LX("Received signature for another assistant").d("signature", assistant_signature));
-            continue;
-        }
-
-        // ACSDK_INFO(LX("New message").d("command", command).d("len", dataRecv));
-        switch (command) {
-            
-            case MessageCommand::AudioIncoming:
-                ACSDK_INFO(LX("Incoming audio."));
-
-                frames = 0;
-                // expected_sequence_number = 0;
-                isReceiving = true;
-
-                break;
-
-            case MessageCommand::AudioFinished:
-                expected_number_of_frames = payload[4] << 8 | payload[5];
-                ACSDK_INFO(LX("Finished receiving audio.").d("frames_received", frames).d("expected_frames", expected_number_of_frames));
-                isReceiving = false;
-
-                break;
-            
-            case MessageCommand::AudioFrame: // TODO: Request for lost messages?
-                frames++;
-                returnCode = wrapper->m_writer->write(&payload[4], 320); 
-                if (returnCode <= 0) {
-                    ACSDK_CRITICAL(LX("Failed to write audio to stream."));
-                }
-
-                break;
-
-            case MessageCommand::StateChange:
-                // Should never happen.
-                break;   
-            default:
-                ACSDK_INFO(LX("Got to default").d("command", command));
-        }
-
-        if (total_length > message_length) {
-            ACSDK_INFO(LX("Received more than one packet").d("message_length", message_length).d("total_length", total_length));
-            memmove(payload, &payload[message_length], MAX_AUDIO_FRAME_SIZE - message_length);
-
-            total_length = total_length - message_length;
-            goto process_new_packet;
-        }
-    }   
-}
-
-void PortAudioMicrophoneWrapper::report(const char* msg, int terminate) {
-  perror(msg);
-  if (terminate) exit(-1); /* failure */
-}
-
-int PortAudioMicrophoneWrapper::disconnect() {
-    ACSDK_INFO(LX("Disconecting"));
-    close(m_sock); /* close the connection */
-    connected = false;
-    return 0;
-}
-
-int PortAudioMicrophoneWrapper::connect() {
-    // Setup the msock
-    sockaddr_in m_addr;
-    while (!connected) {
-        sleep(1);
-        memset(&m_addr, 0, sizeof(m_addr));
-        m_sock = socket(AF_INET, SOCK_STREAM, 0);
-
-        int on = 1;
-        if (setsockopt(m_sock, SOL_SOCKET, SO_REUSEADDR, (const char*) &on, sizeof(on)) == -1) {
-            std::cout << "Could not set up socket " << std::endl;
-            continue;
-        }
-
-        // Connect //
-        m_addr.sin_family = AF_INET;
-        m_addr.sin_port = htons(PORT);
-        int status = inet_pton(AF_INET, host.c_str(), &m_addr.sin_addr);
-
-        if (errno == EAFNOSUPPORT) {
-            std::cout << "Failed with errno: " << errno << std::endl;
-            continue;
-        }
-        status = ::connect(m_sock, (sockaddr *) &m_addr, sizeof(m_addr));
-        if (status == -1) {
-            continue;
-        }
-
-        connected = true;
-    }
-
-    ACSDK_INFO(LX("Connected."));
-
-    return true;
-}
-
-int PortAudioMicrophoneWrapper::send_message(uint8_t *data, size_t length) {
-    ACSDK_INFO(LX("Sending message to server"));
-    return ::send(m_sock, data, length, 0);
 }
 
 

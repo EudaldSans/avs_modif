@@ -44,6 +44,7 @@
 #include "SampleApp/GuiRenderer.h"
 #include "SampleApplicationReturnCodes.h"
 #include "UserInputManager.h"
+#include "CommunicationsManager.h"
 
 #ifdef KWD
 #include <KWD/AbstractKeywordDetector.h>
