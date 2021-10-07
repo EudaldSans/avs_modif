@@ -98,13 +98,14 @@ int main(int argc, char* argv[]) {
             }
         }
 #else
+        std::cout << "argc: " << argc << std::endl;
         if (argc < 2) {
             ConsolePrinter::simplePrint(
                 "USAGE: " + std::string(argv[0]) + " <path_to_AlexaClientSDKConfig.json> [log_level]");
             return SampleAppReturnCode::ERROR;
         }
-        if (3 == argc) {
-            logLevel = std::string(argv[2]);
+        if (4 == argc) {
+            logLevel = std::string(argv[3]);
         }
 #endif
 

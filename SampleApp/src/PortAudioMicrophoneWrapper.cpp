@@ -62,8 +62,8 @@ static const std::string AUTHORIZATION_HEADER("Authorization: Bearer " + SKILL_M
 static const std::string CONTENT_TYPE_HEADER("Content-Type: application/json");
 static const std::string URL("https://api.eu.amazonalexa.com/v1/skillmessages/users/" + ALEXA_USER_ID); 
 
+int16_t *new_frame[320];
 
-bool isActive = false;
 
 /**
  * Create a LogEntry using this file's TAG and the specified event string.
@@ -108,8 +108,8 @@ bool PortAudioMicrophoneWrapper::startStreamingMicrophoneData() {
     ACSDK_INFO(LX(__func__));
     std::lock_guard<std::mutex> lock{m_mutex};
 
-    std::thread t1(fillAudioBuffer, this);
-    t1.detach();
+    // std::thread t1(fillAudioBuffer, this);
+    // t1.detach();
 
     m_isStreaming = true;
 
@@ -180,12 +180,21 @@ void PortAudioMicrophoneWrapper::onDialogUXStateChanged(DialogUXState state) {
     return;
 }
 
+int PortAudioMicrophoneWrapper::newAudioFrame(uint8_t* audio) {
+    memcpy(new_frame, audio, sizeof(uint16_t)*320);
+    ssize_t returnCode = m_writer->write(audio, 320); 
+    if (returnCode <= 0) {
+        ACSDK_CRITICAL(LX("Failed to write audio frame to stream."));
+    }
+    return returnCode;
+}
+
 void PortAudioMicrophoneWrapper::fillAudioBuffer(void* userData) {
     PortAudioMicrophoneWrapper* wrapper = static_cast<PortAudioMicrophoneWrapper*>(userData);
-    int16_t *payload[51200];
+    int16_t *payload[320];
 
     while(wrapper->m_isStreaming) {
-        while(isActive); // FIXME: Is there a need for an active wait here?
+        while(wrapper->m_isStreaming); // FIXME: Is there a need for an active wait here?
         sleep(1);
 
         memset(payload, 0, sizeof(uint16_t)*320);

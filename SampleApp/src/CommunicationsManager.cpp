@@ -222,6 +222,7 @@ process_new_packet:
                 ACSDK_INFO(LX("Incoming audio."));
 
                 frames = 0;
+                comsManager->m_interactionManager->tap();
                 // expected_sequence_number = 0;
                 isReceiving = true;
 
@@ -237,7 +238,7 @@ process_new_packet:
             case MessageCommand::AudioFrame: // TODO: Request for lost messages?
                 frames++;
                 returnCode = 1;
-                // returnCode = wrapper->m_writer->write(&payload[4], 320); 
+                returnCode = comsManager->m_wrapper->newAudioFrame(&payload[4]);
                 if (returnCode <= 0) {
                     ACSDK_CRITICAL(LX("Failed to write audio to stream."));
                 }

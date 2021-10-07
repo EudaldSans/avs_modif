@@ -66,6 +66,14 @@ public:
     /// @}
 
     /**
+    * Adds audio frame to buffer
+    * 
+    * @param audio Pointer to audio data, fixed length of 640 bytes.
+    * @return Error core from the stream.
+    */
+    int newAudioFrame(uint8_t* audio);
+
+    /**
      * Destructor.
      */
     ~PortAudioMicrophoneWrapper();
@@ -111,6 +119,11 @@ private:
      * Whether the microphone is currently streaming.
      */
     bool m_isStreaming;
+
+    /**
+     * Whether the microphone is activeley receiving audio data.
+     */
+    bool m_isActive;
 
     /**
      * Method to report errors.
