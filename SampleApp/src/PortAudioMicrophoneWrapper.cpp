@@ -38,6 +38,9 @@
 #include <fcntl.h>
 #include <time.h>
 
+#include <chrono>
+#include <thread>
+
 #include <AVSCommon/Utils/Configuration/ConfigurationNode.h>
 #include <AVSCommon/Utils/Logger/Logger.h>
 #include "SampleApp/PortAudioMicrophoneWrapper.h"
@@ -108,12 +111,11 @@ bool PortAudioMicrophoneWrapper::startStreamingMicrophoneData() {
     ACSDK_INFO(LX(__func__));
     std::lock_guard<std::mutex> lock{m_mutex};
 
-    // std::thread t1(fillAudioBuffer, this);
-    // t1.detach();
+    std::thread t1(fillAudioBuffer, this);
+    t1.detach();
 
     m_isStreaming = true;
-
-    ACSDK_CRITICAL(LX("START"));
+    m_isActive = true;
 
     return true;
 }
@@ -123,7 +125,16 @@ bool PortAudioMicrophoneWrapper::stopStreamingMicrophoneData() {
     std::lock_guard<std::mutex> lock{m_mutex};
      
     m_isStreaming = false;
+    m_isActive = false;
     return true;
+}
+
+void PortAudioMicrophoneWrapper::startActivity() {
+    m_isActive = true;
+}
+
+void PortAudioMicrophoneWrapper::stopActivity() {
+    m_isActive = false;
 }
 
 bool PortAudioMicrophoneWrapper::isStreaming() {
@@ -194,8 +205,9 @@ void PortAudioMicrophoneWrapper::fillAudioBuffer(void* userData) {
     int16_t *payload[320];
 
     while(wrapper->m_isStreaming) {
-        while(wrapper->m_isStreaming); // FIXME: Is there a need for an active wait here?
-        sleep(1);
+        while(wrapper->m_isActive); // FIXME: Is there a need for an active wait here?
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        ACSDK_INFO(LX("Filling buffer."));
 
         memset(payload, 0, sizeof(uint16_t)*320);
         ssize_t returnCode = wrapper->m_writer->write(payload, 320); 

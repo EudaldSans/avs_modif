@@ -222,9 +222,14 @@ process_new_packet:
                 ACSDK_INFO(LX("Incoming audio."));
 
                 frames = 0;
-                comsManager->m_interactionManager->tap();
+
+                if (!comsManager->m_wrapper->isStreaming())  {
+                    comsManager->m_interactionManager->tap();
+                }
                 // expected_sequence_number = 0;
                 isReceiving = true;
+
+                comsManager->m_wrapper->startActivity();
 
                 break;
 
@@ -232,6 +237,7 @@ process_new_packet:
                 expected_number_of_frames = payload[4] << 8 | payload[5];
                 ACSDK_INFO(LX("Finished receiving audio.").d("frames_received", frames).d("expected_frames", expected_number_of_frames));
                 isReceiving = false;
+                comsManager->m_wrapper->stopActivity();
 
                 break;
             

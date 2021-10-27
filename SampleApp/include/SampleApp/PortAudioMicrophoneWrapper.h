@@ -53,6 +53,12 @@ public:
      */
     bool startStreamingMicrophoneData() override;
 
+    // Signals activity from the distributed microphones.
+    void startActivity();
+
+    // Signals NO activity from the distributed microphones.
+    void stopActivity();
+
     /**
      * Whether the microphone is currently streaming.
      *
