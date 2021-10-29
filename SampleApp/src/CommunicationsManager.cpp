@@ -160,7 +160,7 @@ void CommunicationsManager::onDialogUXStateChanged(DialogUXState state) {
 void CommunicationsManager::receive(void* userData){ 
     CommunicationsManager* comsManager = static_cast<CommunicationsManager*>(userData); 
 
-    uint8_t payload[MAX_AUDIO_FRAME_SIZE] = {0}, fragmented_payload[MAX_AUDIO_FRAME_SIZE] = {0};
+    uint8_t payload[MAX_AUDIO_FRAME_SIZE*2] = {0}, fragmented_payload[MAX_AUDIO_FRAME_SIZE] = {0};
     uint8_t assistant_signature;
     uint16_t message_length, position, total_length;
     int frames = 0, expected_number_of_frames = 0, remaining_length;
@@ -242,6 +242,7 @@ process_new_packet:
                 break;
             
             case MessageCommand::AudioFrame: // TODO: Request for lost messages?
+                ACSDK_INFO(LX("Received new audio."));
                 frames++;
                 returnCode = 1;
                 returnCode = comsManager->m_wrapper->newAudioFrame(&payload[4]);
