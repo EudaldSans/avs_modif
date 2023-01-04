@@ -78,30 +78,13 @@ int main(int argc, char* argv[]) {
             }
         }
     } else {
-<<<<<<< HEAD
-#if defined(KWD_SENSORY)
-        if (argc < 3) {
-            ConsolePrinter::simplePrint(
-                "USAGE: " + std::string(argv[0]) +
-                " <path_to_AlexaClientSDKConfig.json> <path_to_inputs_folder> [log_level]");
-            return SampleAppReturnCode::ERROR;
-        } else {
-            pathToKWDInputFolder = std::string(argv[2]);
-            if (4 == argc) {
-                logLevel = std::string(argv[3]);
-            }
-        }
-#else
-        std::cout << "argc: " << argc << std::endl;
-=======
->>>>>>> 703b06188eae146af396f58be4e47442d7ce5b1e
         if (argc < 2) {
             ConsolePrinter::simplePrint(
                 "USAGE: " + std::string(argv[0]) + " <path_to_AlexaClientSDKConfig.json> [log_level]");
             return SampleAppReturnCode::ERROR;
         }
-        if (4 == argc) {
-            logLevel = std::string(argv[3]);
+        if (3 == argc) {
+            logLevel = std::string(argv[2]);
         }
 
         configFiles.push_back(std::string(argv[1]));

@@ -1436,7 +1436,7 @@ bool SampleApplication::initialize(
 
 #ifdef PORTAUDIO
     std::shared_ptr<PortAudioMicrophoneWrapper> micWrapper = PortAudioMicrophoneWrapper::create(sharedDataStream);
-    client->addAlexaDialogStateObserver(micWrapper);
+    m_client->addAlexaDialogStateObserver(micWrapper);
 
 #elif defined(ANDROID_MICROPHONE)
     std::shared_ptr<applicationUtilities::androidUtilities::AndroidSLESMicrophone> micWrapper =
@@ -1629,7 +1629,7 @@ bool SampleApplication::initialize(
         return false;
     }
 
-    client->addAlexaDialogStateObserver(m_communicationsManager);
+    m_client->addAlexaDialogStateObserver(m_communicationsManager);
 
 #ifdef AUTH_MANAGER
     m_authManager->setRegistrationManager(m_client->getRegistrationManager());

@@ -195,6 +195,8 @@ process_new_packet:
 
         remaining_length = message_length - total_length;
 
+        ACSDK_INFO(LX("Processing new command").d("command", command).d("message_length", message_length));
+
         while (remaining_length > 0) {
             ACSDK_INFO(LX("Received a fragmented packet").d("message_length", message_length).d("remaining_length", remaining_length));
             memset(fragmented_payload, 0, MAX_AUDIO_FRAME_SIZE);
